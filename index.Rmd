@@ -1,0 +1,96 @@
+---
+title: "Get fit the right way"
+author: "hv"
+date: "9/26/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using various tracking devices such as Jawbone Up, Nike FuelBand, and Fitbit is becoming more and more common as people try to monitor their health and physical fitness. While these devices capture the amount of exercise people undertake, they cannot (at least not now) capture how well - or how bad - people do the exercise. This project aims to predict how a group of participants performed a specific exercise (barbell lifts) by using data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data Sources
+Download data from the indicated sites and read into r (make sure your working directory is the same as where you've saved the files):
+```{r}
+# First of all load the required libraries:
+library(caret)
+library(dplyr)
+library(randomForest)
+# then read the files from the working directory
+fittrain <- read.csv("pml-training.csv", sep=",", header = TRUE, na.strings=c("NA","","#DIV/0!"))
+```
+
+### Spliting the data into training and test sets
+We now need to split the loaded data (i.e. fittrain) into a training set (for model training) and a test set by splitting on the 'classe' variable (our variable of interest) with a 70-30 split. And don't forget to set the seed for reproducibility.
+```{r}
+set.seed(1112)
+# Taking 70% for the training data and 30% for the test data
+inTrain <- createDataPartition(y = fittrain$classe, list = FALSE, p=0.7)
+trainData <- fittrain[inTrain,]
+testData <- fittrain[-inTrain,]
+```
+There are a number of NAs in the dataset which we potentially want to filter out, so here we're identifying those that have more than 75% NAs.
+```{r}
+NAs <- colSums(is.na(trainData))/nrow(trainData)
+mostlyNAs <- names(NAs[NAs > 0.75])
+mostlyNACols <- which(NAs > 0.75)
+```
+We then want to use a smaller sample from the training data to work with initially.
+```{r}
+set.seed(3351)
+trainfit <- trainData %>% tbl_df %>% sample_n(size=1000)
+# Then we want to remove the variables that are made up of mostly NAs
+trainfit <- trainfit[,-mostlyNACols]
+# Removing other columns (row number, user name) as candidate predictors
+trainfit <- trainfit[,-grep("X|user_name",names(trainfit))]
+# As time data is available we don't need the timestamp either.
+trainfit <- trainfit[,-grep("cvtd_timestamp",names(trainfit))]
+# Lastly, we remove predictors that have near zero variance
+trainfit <- trainfit[,-nearZeroVar(trainfit)]
+# List of candidate predictors
+modelVariance <- names(trainfit)
+# removing 'classe'
+modelVariance1 <- modelVariance[-grep("classe",modelVariance)] 
+# The predictors for the machine learning are
+modelVariance1
+```
+### Build a random forest model
+Now we are going to use the Random Forest Model to predict the 'classe' variable.
+```{r}
+set.seed(66)
+cleanedTrainData <- trainData[,modelVariance]
+modelFit <- randomForest(classe ~., data=cleanedTrainData, type="class")
+```
+### Get Error Estimates
+Begin with an insample error estimate (from trainData - which is 70% of our original data)
+```{r}
+# Get the values predicted by the model
+predictionTrain <- predict(modelFit,newdata=trainData)
+
+# Use a confusion matrix to get the insample error
+confusionMatrix(predictionTrain,trainData$classe)$table
+```
+The in-sample error is unrealistically high.
+
+Now getting an out-of-sample error estimate (from testData)
+```{r}
+classe_col <- grep("classe",names(testData))
+predictionTest <- predict(modelFit, newdata = testData[,-classe_col], type="class")
+
+confusionMatrix(predictionTest,testData$classe)
+```
+The model has an out-of-sample accuracy of: 0.998.
+
+### Prediciting exercise activity using the model
+Loading the test data
+```{r}
+fittest <- read.csv("pml-testing.csv", sep=",", header = TRUE, na.strings=c("NA","","#DIV/0!"))
+# Perform the prediction
+predfittest <- predict(modelFit, newdata = fittest, type="class")
+
+print(predfittest)
+```
